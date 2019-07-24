@@ -1,220 +1,241 @@
 {
-  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
-  "contentVersion": "1.0.0.0",
-  "parameters": {
-    "sqlServerAdministratorUser": {
-      "type": "string",
-      "defaultvalue": "sqladmin"
-    },
-    "sqlServerAdministratorPassword": {
-      "type": "securestring"
-    }
-  },
-  "variables": {
-    "web_name": "[concat('ttrewards',uniqueString(resourceGroup().id))]",
-    "plan_name": "[concat('ttrewardsplan',uniqueString(resourceGroup().id))]",
-    "function_name": "[concat('ttrewardsfunction',uniqueString(resourceGroup().id))]",
-    "storage_name": "[concat('ttstorage',uniqueString(resourceGroup().id))]",
-    "logicapp_name": "[concat('ttlogicapp',uniqueString(resourceGroup().id))]",
-    "definition": "[concat('{\"contentVersion\":\"1.0.0.0\",\"parameters\":{},\"actions\":{},\"triggers\":{},\"outputs\":{},\"$schema\":\"', variables('workflowSchema'), '\"}')]",
-    "workflowSchema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
-    "sqlserver_name": "[concat('ttsqlserver',uniqueString(resourceGroup().id))]"
-  },
-  "resources": [
-      {
-        "type": "microsoft.insights/components",
-        "name": "[variables('web_name')]",
-        "apiVersion": "2014-08-01",
-        "location": "westus2",
-        "properties": {
-            "ApplicationId": "[variables('web_name')]",
-            "Application_Type": "web",
-            "Flow_Type": "Brownfield",
-            "Request_Source": "IbizaWebAppExtensionCreate"
-        }
-    },
-    {
-      "type": "Microsoft.Web/serverfarms",
-      "sku": {
-        "name": "S1"
-      },
-      "kind": "app",
-      "name": "[variables('plan_name')]",
-      "apiVersion": "2017-08-01",
-      "location": "[resourceGroup().location]"
-    },
-    {
-      "type": "Microsoft.Web/sites",
-      "kind": "app",
-      "name": "[variables('web_name')]",
-      "apiVersion": "2016-08-01",
-      "location": "[resourceGroup().location]",
-      "properties": {
-        "siteConfig": {
-          "appSettings": [
-            {
-              "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
-              "value": "[reference(resourceId('microsoft.insights/components/', variables('web_name')), '2015-05-01').InstrumentationKey]"
-            },
-            {
-              "name": "ByPassLogicApp",
-              "value": "false"
-            }
-          ],
-          "connectionStrings": [
-            {
-              "name": "dbContext",
-              "type":"SQLAzure",
-              "connectionString": "[concat('Server=tcp:',variables('sqlserver_name'),'.database.windows.net,1433;Initial Catalog=rewardsdb;Persist Security Info=False;User ID=',parameters('sqlServerAdministratorUser'),';Password=',parameters('sqlServerAdministratorPassword'),';MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;')]"
-            }
-          ]
-        },
-        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('plan_name'))]"
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.Web/serverfarms', variables('plan_name'))]",
-        "[resourceId('microsoft.insights/components/', variables('web_name'))]"
-      ]
-    },
-    {
-      "type": "Microsoft.Web/sites",
-      "kind": "functionapp",
-      "name": "[variables('function_name')]",
-      "apiVersion": "2015-08-01",
-      "location": "[resourceGroup().location]",
-      "identity": {
-        "type": "SystemAssigned"
-      },
-      "tags": {
-
-      },
-      "properties": {
-        "name": "[variables('function_name')]",
-        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('plan_name'))]",
-        "kind": "functionapp",
-        "httpsOnly": true
-      },
-      "resources": [
-        {
-          "type": "config",
-          "name": "appsettings",
-          "apiVersion": "2015-08-01",
-          "properties": {
-            "APPINSIGHTS_INSTRUMENTATIONKEY": "[reference(resourceId('microsoft.insights/components/', variables('web_name')), '2015-05-01').InstrumentationKey]",
-            "FUNCTIONS_EXTENSION_VERSION": "~1",
-            "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storage_name'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storage_name')), '2015-06-15').key1)]",
-            "WEBSITE_CONTENTSHARE": "[toLower(variables('function_name'))]",
-            "AzureWebJobsDashboard": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storage_name'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storage_name')), '2015-06-15').key1)]",
-            "AzureWebJobsStorage": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storage_name'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storage_name')), '2015-06-15').key1)]"
-          },
-          "dependsOn": [
-            "[concat('Microsoft.Web/Sites/', variables('function_name'))]",
-            "[resourceId('microsoft.insights/components/', variables('web_name'))]"
-          ]
-        }
-      ],
-      "dependsOn": [
-        "[resourceId('Microsoft.Web/serverFarms', variables('plan_name'))]",
-        "[resourceId('Microsoft.Storage/storageAccounts', variables('storage_name'))]"
-      ]
-    },
-    {
-      "type": "Microsoft.Storage/storageAccounts",
-      "name": "[variables('storage_name')]",
-      "apiVersion": "2015-06-15",
-      "location": "[resourceGroup().location]",
-      "properties": {
-        "accountType": "Standard_LRS"
-      }
-    },
-    {
-      "type": "Microsoft.Logic/workflows",
-      "name": "[variables('logicapp_name')]",
-      "apiVersion": "2016-10-01",
-      "location": "[resourceGroup().location]",
-      "tags": {},
-      "properties": {
-        "definition": "[json(variables('definition'))]",
-        "parameters": {},
-        "state": "Enabled"
-      }
-    },
-    {
-      "type": "Microsoft.Sql/servers",
-      "name": "[variables('sqlserver_name')]",
-      "apiVersion": "2015-05-01-preview",
-      "location": "[resourceGroup().location]",
-      "properties": {
-        "administratorLogin": "[parameters('sqlServerAdministratorUser')]",
-        "administratorLoginPassword": "[parameters('sqlServerAdministratorPassword')]",
-        "version": "12.0"
-      },
-      "resources": [
-        {
-          "type": "databases",
-          "sku": {
-            "name": "S0",
-            "tier": "Standard"
-          },
-          "name": "rewardsdb",
-          "apiVersion": "2017-10-01-preview",
-          "location": "[resourceGroup().location]",
-          "properties": {
-            "collation": "SQL_Latin1_General_CP1_CI_AS",
-            "maxSizeBytes": 268435456000,
-            "sampleName": "",
-            "zoneRedundant": false,
-            "licenseType": ""
-          },
-          "dependsOn": [
-            "[concat('Microsoft.Sql/servers/', variables('sqlserver_name'))]"
-          ]
-        },
-        {
-          "type": "firewallrules",
-          "name": "AllowAllWindowsAzureIps",
-          "apiVersion": "2014-04-01-preview",
-          "location": "[resourceGroup().location]",
-          "properties": {
-            "endIpAddress": "255.255.255.255",
-            "startIpAddress": "0.0.0.0"
-          },
-          "dependsOn": [
-            "[concat('Microsoft.Sql/servers/', variables('sqlserver_name'))]"
-          ],
-          "condition": true
-        },
-        {
-          "type": "securityAlertPolicies",
-          "name": "Default",
-          "apiVersion": "2017-03-01-preview",
-          "properties": {
-            "state": "Enabled",
-            "disabledAlerts": [],
-            "emailAddresses": [],
-            "emailAccountAdmins": true
-          },
-          "dependsOn": [
-            "[concat('Microsoft.Sql/servers/', variables('sqlserver_name'))]",
-            "[concat('Microsoft.Sql/servers/', variables('sqlserver_name'), '/databases/', 'rewardsdb')]"
-          ],
-          "condition": false
-        }
-      ]
-    }
-  ],
-  "outputs": {
-    "web": {
-      "type": "string",
-      "value": "[variables('web_name')]"
-    },
-    "function": {
-      "type": "string",
-      "value": "[variables('function_name')]"
-    },
-    "sqlserver": {
-      "type": "string",
-      "value": "[variables('sqlserver_name')]"
-    }
-  }
+	"$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"vmName": {
+			"type": "string",
+			"metadata": {
+				"description": "Name for the Virtual Machine."
+			}
+		},
+		"vmSize": {
+			"type": "string",
+			"defaultValue": "Standard_B2s",
+			"metadata": {
+				"description": "Size for the Virtual Machine."
+			}
+		},
+		"location": {
+			"type": "string",
+			"defaultValue": "[resourceGroup().location]",
+			"metadata": {
+				"description": "Location for the Virtual Machine."
+			}
+		},
+		"appInsightsLocation": {
+			"type": "string",
+			"metadata": {
+				"description": "Location of Application Insight."
+			}
+		},
+		"adminUsername": {
+			"type": "string",
+			"metadata": {
+				"description": "Username for the Virtual Machine."
+			}
+		},
+		"adminPassword": {
+			"type": "securestring",
+			"metadata": {
+				"description": "Password for the Virtual Machine."
+			}
+		},
+		"windowsOSVersion": {
+			"type": "string",
+			"defaultValue": "2016-Datacenter-smalldisk",
+			"allowedValues": ["2012-R2-Datacenter",
+			"2016-Datacenter",
+			"2012-R2-Datacenter-smalldisk",
+			"2016-Datacenter-smalldisk"],
+			"metadata": {
+				"description": "The Windows version for the VM."
+			}
+		}
+	},
+	"variables": {
+		"storageAccountName": "[concat(uniquestring(resourceGroup().id), 'savm')]",
+		"nicName": "[concat(parameters('vmName'), '-NIC')]",
+		"addressPrefix": "10.0.0.0/16",
+		"subnetName": "mySubnet",
+		"subnetPrefix": "10.0.0.0/24",
+		"publicIPAddressName": "[concat(parameters('vmName'), '-ip')]",
+		"networkSecurityGroupName": "[concat(parameters('vmName'), '-nsg')]",
+		"virtualNetworkName": "[concat(parameters('vmName'), '-vnet')]",
+		"vnetId": "[resourceId(resourceGroup().name, 'Microsoft.Network/virtualNetworks', variables('virtualNetworkName'))]",
+		"subnetRef": "[concat(variables('vnetId'), '/subnets/', variables('subnetName'))]",
+		"customScriptExtension": "customScriptExtension"
+	},
+	"resources": [{
+		"type": "Microsoft.Storage/storageAccounts",
+		"name": "[variables('storageAccountName')]",
+		"apiVersion": "2016-01-01",
+		"location": "[parameters('location')]",
+		"sku": {
+			"name": "Standard_LRS"
+		},
+		"kind": "Storage",
+		"properties": {
+			
+		}
+	},
+	{
+		"apiVersion": "2017-08-01",
+		"type": "Microsoft.Network/publicIPAddresses",
+		"name": "[variables('publicIPAddressName')]",
+		"location": "[parameters('location')]",
+		"properties": {
+			"publicIPAllocationMethod": "Dynamic",
+			"dnsSettings": {
+				"domainNameLabel": "[concat(toLower(parameters('vmName')), uniquestring(resourceGroup().id))]"
+			}
+		}
+	},
+	{
+		"apiVersion": "2017-08-01",
+		"type": "Microsoft.Network/virtualNetworks",
+		"name": "[variables('virtualNetworkName')]",
+		"location": "[parameters('location')]",
+		"properties": {
+			"addressSpace": {
+				"addressPrefixes": ["[variables('addressPrefix')]"]
+			},
+			"subnets": [{
+				"name": "[variables('subnetName')]",
+				"properties": {
+					"addressPrefix": "[variables('subnetPrefix')]"
+				}
+			}]
+		}
+	},
+	{
+		"apiVersion": "2016-09-01",
+		"type": "Microsoft.Network/networkInterfaces",
+		"name": "[variables('nicName')]",
+		"location": "[parameters('location')]",
+		"dependsOn": ["[resourceId('Microsoft.Network/publicIPAddresses/', variables('publicIPAddressName'))]",
+		"[resourceId('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]"],
+		"properties": {
+			"ipConfigurations": [{
+				"name": "ipconfig1",
+				"properties": {
+					"privateIPAllocationMethod": "Dynamic",
+					"publicIPAddress": {
+						"id": "[resourceId(resourceGroup().name, 'Microsoft.Network/publicIPAddresses',variables('publicIPAddressName'))]"
+					},
+					"subnet": {
+						"id": "[variables('subnetRef')]"
+					}
+				}
+			}],
+			"networkSecurityGroup": {
+				"id": "[resourceId(resourceGroup().name, 'Microsoft.Network/networkSecurityGroups', variables('networkSecurityGroupName'))]"
+			}
+		}
+	},
+	{
+		"name": "[variables('networkSecurityGroupName')]",
+		"type": "Microsoft.Network/networkSecurityGroups",
+		"apiVersion": "2017-06-01",
+		"location": "[parameters('location')]",
+		"properties": {
+			"securityRules": [{
+				"name": "default-allow-rdp",
+				"properties": {
+					"description": "Allow RDP",
+					"priority": 100,
+					"protocol": "TCP",
+					"access": "Allow",
+					"direction": "Inbound",
+					"sourceAddressPrefix": "*",
+					"sourcePortRange": "*",
+					"destinationAddressPrefix": "*",
+					"destinationPortRange": "3389"
+				}
+			},
+			{
+				"name": "web_rule",
+				"properties": {
+					"description": "Allow WEB",
+					"protocol": "*",
+					"sourcePortRange": "*",
+					"destinationPortRange": "80",
+					"sourceAddressPrefix": "*",
+					"destinationAddressPrefix": "*",
+					"access": "Allow",
+					"priority": 101,
+					"direction": "Inbound"
+				}
+			}]
+		}
+	},
+	{
+		"name": "[parameters('vmName')]",
+		"type": "microsoft.insights/components",
+		"location": "[parameters('appInsightsLocation')]",
+		"apiVersion": "2014-08-01",
+		"properties": {
+			"ApplicationId": "[parameters('vmName')]",
+			"Request_Source": "AzureTfsExtensionAzureProject"
+		}
+	},
+	{
+		"apiVersion": "2016-04-30-preview",
+		"type": "Microsoft.Compute/virtualMachines",
+		"name": "[parameters('vmName')]",
+		"location": "[parameters('location')]",
+		"dependsOn": ["[resourceId('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]",
+		"[resourceId('Microsoft.Network/networkInterfaces/', variables('nicName'))]"],
+		"properties": {
+			"hardwareProfile": {
+				"vmSize": "[parameters('vmSize')]"
+			},
+			"osProfile": {
+				"computerName": "[parameters('vmName')]",
+				"adminUsername": "[parameters('adminUsername')]",
+				"adminPassword": "[parameters('adminPassword')]",
+				"windowsConfiguration": {
+					"provisionVmAgent": "true"
+				}
+			},
+			"storageProfile": {
+				"imageReference": {
+					"publisher": "MicrosoftWindowsServer",
+					"offer": "WindowsServer",
+					"sku": "[parameters('windowsOSVersion')]",
+					"version": "latest"
+				},
+				"osDisk": {
+					"createOption": "fromImage"
+				},
+				"dataDisks": []
+			},
+			"networkProfile": {
+				"networkInterfaces": [{
+					"id": "[resourceId('Microsoft.Network/networkInterfaces',variables('nicName'))]"
+				}]
+			},
+			"diagnosticsProfile": {
+				"bootDiagnostics": {
+					"enabled": "true",
+					"storageUri": "[reference(resourceId(resourceGroup().name, 'Microsoft.Storage/storageAccounts/', variables('storageAccountName'))).primaryEndpoints['blob']]"
+				}
+			}
+		},
+		"resources": [{
+			"name": "[concat(parameters('vmName'), '/', variables('customScriptExtension'))]",
+			"type": "Microsoft.Compute/virtualMachines/extensions",
+			"location": "[parameters('location')]",
+			"apiVersion": "2015-06-15",
+			"dependsOn": ["[concat('Microsoft.Compute/virtualMachines/', parameters('vmName'))]"],
+			"properties": {
+				"publisher": "Microsoft.Compute",
+				"type": "CustomScriptExtension",
+				"typeHandlerVersion": "1.9",
+				"autoUpgradeMinorVersion": true,
+				"protectedSettings": {
+					"commandToExecute": "[concat('powershell.exe setx /m APPINSIGHTS_INSTRUMENTATIONKEY ', reference(resourceId('microsoft.insights/components/', parameters('vmName')), '2015-05-01').InstrumentationKey, '; Import-Module servermanager; Add-WindowsFeature Web-Server, Web-Asp-Net45; Invoke-WebRequest https://download.microsoft.com/download/0/1/D/01DC28EA-638C-4A22-A57B-4CEF97755C6C/WebDeploy_amd64_en-US.msi -outfile $env:temp\\WebDeploy_amd64_en-US.msi; Start-Process $env:temp\\WebDeploy_amd64_en-US.msi -ArgumentList \"/quiet\" -Wait')]"
+				}
+			}
+		}]
+	}]
 }
